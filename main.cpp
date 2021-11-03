@@ -1,6 +1,6 @@
 #include <iostream>
 #include <string>
-#include <map>
+#include <unordered_map>
 #include <stdexcept>
 #include <algorithm>
 
@@ -66,7 +66,7 @@ class Folder : public Element {
 //  explicit Folder(const Name& folderName);
   static Key keyFromName(const Name& name);
 
-  std::map<Key, const Element*> children_;
+  std::unordered_map<Key, const Element*> children_;
 
   const Key checkNameAvailability(const Name& elementName) const;
 };
