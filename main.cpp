@@ -27,6 +27,7 @@ class NonCopyable {
 };
 
 class Folder;
+class Shortcut;
 
 class Element : private NonCopyable {
  public:
@@ -37,6 +38,8 @@ class Element : private NonCopyable {
   const Name getAbsoluteName() const;
   friend std::ostream& operator<< (std::ostream& out, const Element& element);
   friend Folder;
+  friend Shortcut;
+
  protected:
   Element(const Name& name, const Folder* parent);
   virtual ~Element() = default;
@@ -48,14 +51,16 @@ class Element : private NonCopyable {
   // hook 1
   virtual const std::string& getType() const noexcept = 0;
   // hook 2 : hook appele par la template method (le patron)
-  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept;
+  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept = 0;
   const Name name_;
   const Folder* const parent_ = nullptr;
+
+  const std::shared_ptr<const Element>& getSharedPtr() const noexcept;
 };
 
 class File final : public Element {
  public:
-  friend class Folder;
+  friend Folder;
   virtual Size getSize() const override;
  private:
   File(const Name& fileName, Size size, const Folder& parent);
@@ -70,8 +75,10 @@ class Folder : public Element {
   // static Folder& getRoot();
   File& createFile(const Name& fileName, Size fileSize);
   Folder& createFolder(const Name& folderName);
+  Shortcut& createShortcut(const Name& shortcutName, const Element& target);
   virtual Size getSize() const override;
   void removeElement(const Name& elementName);
+  friend Element;
  protected:
   virtual ~Folder();
   using Element::Element;
@@ -82,12 +89,14 @@ class Folder : public Element {
 
   const std::string& getType() const noexcept override;
 
-  std::unordered_map<Key, std::unique_ptr<const Element>> children_;
+  std::unordered_map<Key, std::shared_ptr<const Element>> children_;
   mutable std::optional<Size> computedSize_;
 
   const Key checkNameAvailability(const Name& elementName) const;
 
   virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept override;
+
+  const std::shared_ptr<const Element>& getSharedPtrFromChild(const Name& childNname) const noexcept;
 
   void invalidateSize() const noexcept;
 };
@@ -103,6 +112,18 @@ class Partition final : public Folder {
   void checkRemainingSize(Size desiredSize) const;
   const std::string& getType() const noexcept override;
   Size capacity_;
+};
+
+class Shortcut final : public Element {
+ public:
+  friend Folder;
+  virtual Size getSize() const noexcept override;
+ private:
+  Shortcut(const Name& fileName, const Element& target, const Folder& parent);
+  virtual ~Shortcut() = default ;
+  const std::string& getType() const noexcept override;
+  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept override;
+  std::weak_ptr<const Element> target_;
 };
 
 Element::Element(const Name& name, const Folder* parent) : name_{name}, parent_{parent} {
@@ -127,6 +148,10 @@ const Folder* Element::getParent() const noexcept {
 //Folder::Folder(const Name& name) : Element { name } {
 //}
 
+const std::shared_ptr<const Element>& Element::getSharedPtr() const noexcept {
+  return parent_->getSharedPtrFromChild(name_);
+}
+
 Folder::~Folder() {
 }
 
@@ -134,7 +159,7 @@ Folder& Folder::createFolder(const Name& folderName) {
   const Key key{checkNameAvailability(folderName)};
   Folder* folder{ new Folder {folderName, this} };
   // children_.insert({key, folder});
-  children_[key].reset(folder);
+  children_[key].reset(folder, std::default_delete<const Element>{});
   return *folder;
 }
 
@@ -142,9 +167,16 @@ File& Folder::createFile(const Name& fileName, Size size) {
   const Key key{checkNameAvailability(fileName)};
   File* file{new File {fileName, size, *this}};
   // children_.insert({key, file});
-  children_[key].reset(file);
+  children_[key].reset(file, std::default_delete<const Element>{});
   invalidateSize();
   return *file;
+}
+
+Shortcut& Folder::createShortcut(const Name& shortcutName, const Element& target) {
+  const Key key{checkNameAvailability(shortcutName)};
+  Shortcut* shortcut{new Shortcut {shortcutName, target, *this} };
+  children_[key].reset(shortcut, std::default_delete<const Element>{});
+  return *shortcut;
 }
 
 const Folder::Key Folder::checkNameAvailability(const Name& elementName) const {
@@ -177,6 +209,10 @@ void Folder::invalidateSize() const noexcept {
   computedSize_.reset();
   if (getParent())
     getParent()->invalidateSize();
+}
+
+const std::shared_ptr<const Element>& Folder::getSharedPtrFromChild(const Name& childNname) const noexcept {
+  return children_.at(keyFromName(childNname));
 }
 
 File::File(const Name& fileName, Size size, const Folder& parent) : Element { fileName, &parent}, size_ { size } {
@@ -217,9 +253,6 @@ void Element::output(std::ostream& out, unsigned int indentLevel) const noexcept
   onElementDisplayed(out, indentLevel);
 }
 
-void Element::onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept {
-}
-
 const std::string& File::getType() const noexcept {
   static std::string type{"File"};
   return type;
@@ -246,6 +279,23 @@ void Folder::onElementDisplayed(std::ostream& out, unsigned int indentLevel) con
   }
 }
 
+const std::string& Shortcut::getType() const noexcept {
+  static std::string type{"Shortcut"};
+  return type;
+}
+
+void Shortcut::onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept {
+  const std::shared_ptr<const Element> sp {target_.lock()};
+  cout << " --> " << (sp ? sp->getAbsoluteName() : "inexisting element");
+}
+
+Shortcut::Shortcut(const Name& fileName, const Element& target, const Folder& parent) : Element { fileName, &parent}, target_{target.getSharedPtr()} {
+}
+
+Size Shortcut::getSize() const noexcept {
+  return 0;
+}
+
 int main() {
   try {
     // Folder& r1{ Folder::getRoot() };
@@ -262,7 +312,10 @@ int main() {
     cout << r1.getSize() << " bytes\n";
     Folder& r3{ r2.createFolder("r3") };
     File& f3 = r1.createFile("f3", 899_bytes);
-    File& f4 = r3.createFile("f3", 899_bytes);
+    File& f4 = r3.createFile("f4", 899_bytes);
+
+    Shortcut& s1{ r2.createShortcut("s1", f1) };
+    Shortcut& s2{ r2.createShortcut("s2", f2) };
 
     std::cout << f1.getAbsoluteName() << std::endl;
     // std::cout << f2.getAbsoluteName() << std::endl;
@@ -270,6 +323,8 @@ int main() {
 
     cout << r1 << std::endl;
     cout << f1 << std::endl;
+    cout << r2 << std::endl;
+    r2.removeElement("f2");
     cout << r2 << std::endl;
   } catch (const std::exception& e) {
     cout << e.what() << std::endl;
