@@ -35,12 +35,20 @@ class Element : private NonCopyable {
   Element(const Element&) = delete;
   Element& operator= (const Element&) = delete;
   const Name getAbsoluteName() const;
+  friend std::ostream& operator<< (std::ostream& out, const Element& element);
+  friend Folder;
  protected:
   Element(const Name& name, const Folder* parent);
   virtual ~Element() = default;
   const Folder* getParent() const noexcept;
 
  private:
+  // template method
+  void output(std::ostream& out, unsigned int indentLevel) const noexcept;
+  // hook 1
+  virtual const std::string& getType() const noexcept = 0;
+  // hook 2 : hook appele par la template method (le patron)
+  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept;
   const Name name_;
   const Folder* const parent_ = nullptr;
 };
@@ -52,6 +60,8 @@ class File final : public Element {
  private:
   File(const Name& fileName, Size size, const Folder& parent);
   virtual ~File() = default ;
+  const std::string& getType() const noexcept override;
+  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept override;
   const Size size_;
 };
 
@@ -70,10 +80,14 @@ class Folder : public Element {
 //  explicit Folder(const Name& folderName);
   static Key keyFromName(const Name& name);
 
+  const std::string& getType() const noexcept override;
+
   std::unordered_map<Key, std::unique_ptr<const Element>> children_;
   mutable std::optional<Size> computedSize_;
 
   const Key checkNameAvailability(const Name& elementName) const;
+
+  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept override;
 
   void invalidateSize() const noexcept;
 };
@@ -87,6 +101,7 @@ class Partition final : public Folder {
   Partition(const Name& name, Capacity capacity);
   ~Partition() = default;
   void checkRemainingSize(Size desiredSize) const;
+  const std::string& getType() const noexcept override;
   Size capacity_;
 };
 
@@ -182,13 +197,53 @@ Partition::Partition(const Name &name, Capacity capacity) : Folder{name, nullptr
 }
 
 Partition& Partition::getInstance() {
-  static Partition instance{"/", 10'000_bytes};
+  static Partition instance{"/r1", 10'000_bytes};
   return instance;
 }
 
 void Partition::checkRemainingSize(Size desiredSize) const {
   if (capacity_ - getSize() < desiredSize)
     throw domain_error {"capacity overflow."};
+}
+
+std::ostream& operator<< (std::ostream& out, const Element& element) {
+  unsigned int indentLevel{0};
+  element.output(out, indentLevel);
+  return out;
+}
+
+void Element::output(std::ostream& out, unsigned int indentLevel) const noexcept {
+  out << getType() << ": " << name_;
+  onElementDisplayed(out, indentLevel);
+}
+
+void Element::onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept {
+}
+
+const std::string& File::getType() const noexcept {
+  static std::string type{"File"};
+  return type;
+}
+
+const std::string& Folder::getType() const noexcept {
+  static std::string type{"Folder"};
+  return type;
+}
+
+const std::string& Partition::getType() const noexcept {
+  static std::string type{"Partition"};
+  return type;
+}
+
+void File::onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept {
+}
+
+void Folder::onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept {
+  ++indentLevel;
+  for (const auto& [_, element] : children_) {
+    out << "\n" << std::string(indentLevel * 2, ' ');
+    element->output(out, indentLevel);
+  }
 }
 
 int main() {
@@ -203,12 +258,19 @@ int main() {
     File& f2{ r2.createFile("f2", 1234_bytes) };
     // File& f3{ r2.createFile("f3", 12'340_bytes) };
     cout << r1.getSize() << " bytes\n";
-    r2.removeElement("f2");
+    // r2.removeElement("f2");
     cout << r1.getSize() << " bytes\n";
+    Folder& r3{ r2.createFolder("r3") };
+    File& f3 = r1.createFile("f3", 899_bytes);
+    File& f4 = r3.createFile("f3", 899_bytes);
 
     std::cout << f1.getAbsoluteName() << std::endl;
     // std::cout << f2.getAbsoluteName() << std::endl;
     std::cout << r1.getAbsoluteName() << std::endl;
+
+    cout << r1 << std::endl;
+    cout << f1 << std::endl;
+    cout << r2 << std::endl;
   } catch (const std::exception& e) {
     cout << e.what() << std::endl;
   }
