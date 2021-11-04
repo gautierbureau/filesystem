@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <algorithm>
+#include <optional>
+#include <memory>
 
 using std::string;
 using std::cout;
@@ -28,7 +30,7 @@ class Folder;
 
 class Element : private NonCopyable {
  public:
-  friend Folder;
+  friend std::default_delete<const Element>;
   virtual Size getSize() const = 0;
   Element(const Element&) = delete;
   Element& operator= (const Element&) = delete;
@@ -36,6 +38,8 @@ class Element : private NonCopyable {
  protected:
   Element(const Name& name, const Folder* parent);
   virtual ~Element() = default;
+  const Folder* getParent() const noexcept;
+
  private:
   const Name name_;
   const Folder* const parent_ = nullptr;
@@ -66,9 +70,12 @@ class Folder : public Element {
 //  explicit Folder(const Name& folderName);
   static Key keyFromName(const Name& name);
 
-  std::unordered_map<Key, const Element*> children_;
+  std::unordered_map<Key, std::unique_ptr<const Element>> children_;
+  mutable std::optional<Size> computedSize_;
 
   const Key checkNameAvailability(const Name& elementName) const;
+
+  void invalidateSize() const noexcept;
 };
 
 class Partition final : public Folder {
@@ -93,6 +100,10 @@ const Name Element::getAbsoluteName() const {
   return leftPart + name_;
 }
 
+const Folder* Element::getParent() const noexcept {
+  return parent_;
+}
+
 //Folder& Folder::getRoot() {
 //  static Folder root{"/", nullptr};
 //  return root;
@@ -102,21 +113,22 @@ const Name Element::getAbsoluteName() const {
 //}
 
 Folder::~Folder() {
-  for (const auto& [_, element] : children_)
-    delete element;
 }
 
 Folder& Folder::createFolder(const Name& folderName) {
   const Key key{checkNameAvailability(folderName)};
   Folder* folder{ new Folder {folderName, this} };
-  children_.insert({key, folder});
+  // children_.insert({key, folder});
+  children_[key].reset(folder);
   return *folder;
 }
 
 File& Folder::createFile(const Name& fileName, Size size) {
   const Key key{checkNameAvailability(fileName)};
   File* file{new File {fileName, size, *this}};
-  children_.insert({key, file});
+  // children_.insert({key, file});
+  children_[key].reset(file);
+  invalidateSize();
   return *file;
 }
 
@@ -132,15 +144,24 @@ void Folder::removeElement(const Name& elementName) {
   auto itor {children_.find(keyFromName(elementName))};
   if (itor == cend(children_))
     throw std::domain_error{ elementName + " does not exist."};
-  delete itor->second;
+  invalidateSize();
   children_.erase(keyFromName(elementName));
 }
 
 Size Folder::getSize() const {
-  Size size{0_bytes};
-  for (const auto& [_, element] : children_)
-    size += element->getSize();
-  return size;
+  if (!computedSize_.has_value()) {
+    Size size{0_bytes};
+    for (const auto& [_, element] : children_)
+      size += element->getSize();
+    computedSize_ = size;
+  }
+  return computedSize_.value();
+}
+
+void Folder::invalidateSize() const noexcept {
+  computedSize_.reset();
+  if (getParent())
+    getParent()->invalidateSize();
 }
 
 File::File(const Name& fileName, Size size, const Folder& parent) : Element { fileName, &parent}, size_ { size } {
@@ -182,10 +203,11 @@ int main() {
     File& f2{ r2.createFile("f2", 1234_bytes) };
     // File& f3{ r2.createFile("f3", 12'340_bytes) };
     cout << r1.getSize() << " bytes\n";
-    //r2.removeElement("f2");
+    r2.removeElement("f2");
+    cout << r1.getSize() << " bytes\n";
 
     std::cout << f1.getAbsoluteName() << std::endl;
-    std::cout << f2.getAbsoluteName() << std::endl;
+    // std::cout << f2.getAbsoluteName() << std::endl;
     std::cout << r1.getAbsoluteName() << std::endl;
   } catch (const std::exception& e) {
     cout << e.what() << std::endl;
