@@ -55,7 +55,7 @@ class Element : private NonCopyable {
   const Name name_;
   const Folder* const parent_ = nullptr;
 
-  const std::shared_ptr<const Element>& getSharedPtr() const noexcept;
+  virtual const std::shared_ptr<const Element>& getSharedPtr() const noexcept;
 };
 
 class File final : public Element {
@@ -111,6 +111,7 @@ class Partition final : public Folder {
   ~Partition() = default;
   void checkRemainingSize(Size desiredSize) const;
   const std::string& getType() const noexcept override;
+  const std::shared_ptr<const Element>& getSharedPtr() const noexcept override;
   Size capacity_;
 };
 
@@ -242,6 +243,15 @@ void Partition::checkRemainingSize(Size desiredSize) const {
     throw domain_error {"capacity overflow."};
 }
 
+const std::shared_ptr<const Element>& Partition::getSharedPtr() const noexcept {
+//  struct PartitionDeleter {
+//    void operator()(const Element* e) {}
+//  };
+//  static std::shared_ptr<const Element> sp { &getInstance(), PartitionDeleter{}};
+  static std::shared_ptr<const Element> sp { &getInstance(), [](const Element* e) {}};
+  return sp;
+}
+
 std::ostream& operator<< (std::ostream& out, const Element& element) {
   unsigned int indentLevel{0};
   element.output(out, indentLevel);
@@ -316,6 +326,7 @@ int main() {
 
     Shortcut& s1{ r2.createShortcut("s1", f1) };
     Shortcut& s2{ r2.createShortcut("s2", f2) };
+    Shortcut& s3 {r2.createShortcut("shortcut on root", r1)};
 
     std::cout << f1.getAbsoluteName() << std::endl;
     // std::cout << f2.getAbsoluteName() << std::endl;
