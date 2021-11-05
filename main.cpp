@@ -113,6 +113,14 @@ class Folder : public Element, public Counter<Folder> {
 
   const std::shared_ptr<const Element>& getSharedPtrFromChild(const Name& childNname) const noexcept;
 
+  template <class T, class... Args>
+  T& createElement(const Name& elementName, Args... args) {
+    const Key key{checkNameAvailability(elementName)};
+    T* element{new T {elementName, args...}};
+    children_[key].reset(element, std::default_delete<const Element>{});
+    return *element;
+  }
+
   void invalidateSize() const noexcept;
 };
 
@@ -139,7 +147,7 @@ class Shortcut final : public Element, public Counter<Shortcut> {
   Shortcut(const Name& fileName, const Element& target, const Folder& parent);
   virtual ~Shortcut() = default ;
   const std::string& getType() const noexcept override;
-  virtual void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept override;
+  void onElementDisplayed(std::ostream& out, unsigned int indentLevel) const noexcept override;
   std::weak_ptr<const Element> target_;
 };
 
@@ -173,27 +181,17 @@ Folder::~Folder() {
 }
 
 Folder& Folder::createFolder(const Name& folderName) {
-  const Key key{checkNameAvailability(folderName)};
-  Folder* folder{ new Folder {folderName, this} };
-  // children_.insert({key, folder});
-  children_[key].reset(folder, std::default_delete<const Element>{});
-  return *folder;
+  return createElement<Folder>(folderName, this);
 }
 
 File& Folder::createFile(const Name& fileName, Size size) {
-  const Key key{checkNameAvailability(fileName)};
-  File* file{new File {fileName, size, *this}};
-  // children_.insert({key, file});
-  children_[key].reset(file, std::default_delete<const Element>{});
-  invalidateSize();
-  return *file;
+  if (size != 0)
+    invalidateSize();
+  return createElement<File>(fileName, size, std::cref(*this));
 }
 
 Shortcut& Folder::createShortcut(const Name& shortcutName, const Element& target) {
-  const Key key{checkNameAvailability(shortcutName)};
-  Shortcut* shortcut{new Shortcut {shortcutName, target, *this} };
-  children_[key].reset(shortcut, std::default_delete<const Element>{});
-  return *shortcut;
+  return createElement<Shortcut>(shortcutName, std::cref(target), std::cref(*this));
 }
 
 const Folder::Key Folder::checkNameAvailability(const Name& elementName) const {
