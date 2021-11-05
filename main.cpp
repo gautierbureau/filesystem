@@ -26,10 +26,23 @@ class NonCopyable {
   NonCopyable& operator=(const NonCopyable&) = delete;
 };
 
+template <class T>
+class Counter {
+ public:
+ public:
+  Counter() { ++getCount(); }
+  Counter(const Counter& counter) : Counter{} {}
+  Counter(Counter&& counter) noexcept : Counter{} {}
+  ~Counter() { --getCount();  }
+  static size_t getNbInstances() { return getCount(); }
+ protected:
+  static size_t& getCount() { static size_t count{0}; return count; }
+};
+
 class Folder;
 class Shortcut;
 
-class Element : private NonCopyable {
+class Element : private NonCopyable, public Counter<Element> {
  public:
   friend std::default_delete<const Element>;
   virtual Size getSize() const = 0;
@@ -58,10 +71,11 @@ class Element : private NonCopyable {
   virtual const std::shared_ptr<const Element>& getSharedPtr() const noexcept;
 };
 
-class File final : public Element {
+class File final : public Element, public Counter<File> {
  public:
   friend Folder;
   virtual Size getSize() const override;
+  using Counter<File>::getNbInstances;
  private:
   File(const Name& fileName, Size size, const Folder& parent);
   virtual ~File() = default ;
@@ -70,7 +84,7 @@ class File final : public Element {
   const Size size_;
 };
 
-class Folder : public Element {
+class Folder : public Element, public Counter<Folder> {
  public:
   // static Folder& getRoot();
   File& createFile(const Name& fileName, Size fileSize);
@@ -79,6 +93,7 @@ class Folder : public Element {
   virtual Size getSize() const override;
   void removeElement(const Name& elementName);
   friend Element;
+  using Counter<Folder>::getNbInstances;
  protected:
   virtual ~Folder();
   using Element::Element;
@@ -115,10 +130,11 @@ class Partition final : public Folder {
   Size capacity_;
 };
 
-class Shortcut final : public Element {
+class Shortcut final : public Element, public Counter<Shortcut> {
  public:
   friend Folder;
   virtual Size getSize() const noexcept override;
+  using Counter<Shortcut>::getNbInstances;
  private:
   Shortcut(const Name& fileName, const Element& target, const Folder& parent);
   virtual ~Shortcut() = default ;
@@ -337,6 +353,11 @@ int main() {
     cout << r2 << std::endl;
     r2.removeElement("f2");
     cout << r2 << std::endl;
+
+    cout << Element::getNbInstances() << " elements\n";
+    cout << File::getNbInstances() << " files\n";
+    cout << Shortcut::getNbInstances() << " shortcuts\n";
+    cout << Folder::getNbInstances() << " folders\n";
   } catch (const std::exception& e) {
     cout << e.what() << std::endl;
   }
